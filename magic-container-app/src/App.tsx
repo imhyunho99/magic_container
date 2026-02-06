@@ -3,6 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 
+// ... (Interfaces remain same, add ChatMessage)
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 interface GpuInfo {
   name: string;
   vram_total: number;
@@ -51,11 +57,17 @@ interface ProgressPayload {
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState<"system" | "models">("system");
+  const [activeTab, setActiveTab] = useState<"system" | "models" | "chat">("system");
   const [specs, setSpecs] = useState<SystemSpecs | null>(null);
   const [models, setModels] = useState<ModelConfig[]>([]);
   const [loadingSpecs, setLoadingSpecs] = useState(true);
   const [installProgress, setInstallProgress] = useState<Record<string, ProgressPayload>>({});
+  
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [inputMsg, setInputMsg] = useState("");
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const [activeModelName, setActiveModelName] = useState("");
 
   useEffect(() => {
     async function fetchData() {
@@ -73,7 +85,6 @@ function App() {
     }
     fetchData();
 
-    // Listen for install progress
     const unlisten = listen<ProgressPayload>("install-progress", (event) => {
       setInstallProgress((prev) => ({
         ...prev,
@@ -88,7 +99,6 @@ function App() {
 
   const handleInstall = async (modelId: string) => {
     try {
-      // Set initial state to avoid flicker
       setInstallProgress((prev) => ({
         ...prev,
         [modelId]: { model_id: modelId, status: "downloading", progress: 0, message: "Starting..." },
@@ -97,12 +107,52 @@ function App() {
     } catch (error) {
       console.error("Install failed:", error);
       alert("Installation failed: " + error);
-      // Reset progress on error
       setInstallProgress((prev) => {
         const newState = { ...prev };
         delete newState[modelId];
         return newState;
       });
+    }
+  };
+
+  const handleLaunch = async (model: ModelConfig) => {
+    try {
+        // Optimistically set progress or showing loading
+        alert(`Launching ${model.name}... This may take a few seconds.`);
+        const res = await invoke("launch_model_command", { modelId: model.id });
+        console.log(res);
+        setActiveModelName(model.name);
+        setActiveTab("chat");
+        setChatMessages([{ role: "assistant", content: `Model ${model.name} loaded. How can I help you?` }]);
+    } catch (error) {
+        console.error("Launch failed:", error);
+        alert("Failed to launch model: " + error);
+    }
+  };
+
+  const sendChatMessage = async () => {
+    if (!inputMsg.trim()) return;
+
+    const userMsg = inputMsg;
+    setChatMessages((prev) => [...prev, { role: "user", content: userMsg }]);
+    setInputMsg("");
+    setIsChatLoading(true);
+
+    try {
+        const response = await fetch("http://localhost:8000/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: userMsg })
+        });
+        
+        if (!response.ok) throw new Error("Server error");
+        
+        const data = await response.json();
+        setChatMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+    } catch (error) {
+        setChatMessages((prev) => [...prev, { role: "assistant", content: "Error: Could not connect to model server." }]);
+    } finally {
+        setIsChatLoading(false);
     }
   };
 
@@ -113,18 +163,15 @@ function App() {
 
   const checkCompatibility = (requirements: ModelRequirements) => {
     if (!specs) return { compatible: false, reason: "System specs not loaded" };
-    
     if (specs.total_memory < requirements.min_ram) {
       return { compatible: false, reason: `Insufficient RAM (Needs ${formatBytes(requirements.min_ram)})` };
     }
-
     if (requirements.min_vram > 0) {
         const totalVram = specs.gpus.reduce((sum, gpu) => sum + gpu.vram_total, 0);
         if (specs.gpus.length > 0 && totalVram > 0 && totalVram < requirements.min_vram) {
              return { compatible: false, reason: `Insufficient VRAM (Needs ${formatBytes(requirements.min_vram)})` };
         }
     }
-    
     return { compatible: true };
   };
 
@@ -133,57 +180,37 @@ function App() {
       <header className="app-header">
         <h1>Magic Container</h1>
         <nav className="tabs">
-          <button 
-            className={activeTab === "system" ? "active" : ""} 
-            onClick={() => setActiveTab("system")}
-          >
-            System Info
-          </button>
-          <button 
-            className={activeTab === "models" ? "active" : ""} 
-            onClick={() => setActiveTab("models")}
-          >
-            Model Hub
-          </button>
+          <button className={activeTab === "system" ? "active" : ""} onClick={() => setActiveTab("system")}>System Info</button>
+          <button className={activeTab === "models" ? "active" : ""} onClick={() => setActiveTab("models")}>Model Hub</button>
+          <button className={activeTab === "chat" ? "active" : ""} onClick={() => setActiveTab("chat")} disabled={!activeModelName}>Chat</button>
         </nav>
       </header>
 
       <div className="content">
         {loadingSpecs ? (
-          <p>Loading system information...</p>
+          <p>Loading...</p>
         ) : (
           <>
             {activeTab === "system" && specs && (
               <div className="specs-container">
-                <h2>System Diagnostics</h2>
-                <div className="spec-item">
-                  <strong>OS:</strong> {specs.os_name} {specs.os_version}
-                </div>
-                <div className="spec-item">
-                  <strong>CPU:</strong> {specs.cpu_model} ({specs.cpu_cores} Cores)
-                </div>
-                <div className="spec-item">
-                  <strong>Memory:</strong> {formatBytes(specs.used_memory)} used / {formatBytes(specs.total_memory)} total
-                </div>
-                
-                {specs.gpus.length > 0 ? (
-                  <div className="gpu-section">
-                    <h3>GPUs</h3>
-                    {specs.gpus.map((gpu, index) => (
-                      <div key={index} className="spec-item gpu-item">
-                        <strong>{gpu.name}</strong>
-                        <br />
-                        VRAM: {formatBytes(gpu.vram_used)} / {formatBytes(gpu.vram_total)}
-                        {gpu.driver_version && <div>Driver: {gpu.driver_version}</div>}
-                        {gpu.cuda_version && <div>CUDA: {gpu.cuda_version}</div>}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="spec-item">
-                    <strong>GPU:</strong> No dedicated GPU detected.
-                  </div>
-                )}
+                  {/* (System specs rendering same as before) */}
+                  <h2>System Diagnostics</h2>
+                  <div className="spec-item"><strong>OS:</strong> {specs.os_name} {specs.os_version}</div>
+                  <div className="spec-item"><strong>CPU:</strong> {specs.cpu_model} ({specs.cpu_cores} Cores)</div>
+                  <div className="spec-item"><strong>Memory:</strong> {formatBytes(specs.used_memory)} used / {formatBytes(specs.total_memory)} total</div>
+                  {specs.gpus.length > 0 ? (
+                    <div className="gpu-section">
+                      <h3>GPUs</h3>
+                      {specs.gpus.map((gpu, index) => (
+                        <div key={index} className="spec-item gpu-item">
+                          <strong>{gpu.name}</strong><br />
+                          VRAM: {formatBytes(gpu.vram_used)} / {formatBytes(gpu.vram_total)}
+                          {gpu.driver_version && <div>Driver: {gpu.driver_version}</div>}
+                          {gpu.cuda_version && <div>CUDA: {gpu.cuda_version}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  ) : <div className="spec-item"><strong>GPU:</strong> No dedicated GPU detected.</div>}
               </div>
             )}
 
@@ -204,30 +231,24 @@ function App() {
                         <p className="description">{model.description}</p>
                         <div className="requirements">
                             <span>RAM: {formatBytes(model.requirements.min_ram)}</span>
-                            {model.requirements.min_vram > 0 && <span>VRAM: {formatBytes(model.requirements.min_vram)}</span>}
                         </div>
                         <div className="action-area">
                             {progress ? (
                                 <div className="progress-container">
                                     <div className="progress-bar">
-                                        <div 
-                                            className="progress-fill" 
-                                            style={{ width: `${progress.progress}%` }}
-                                        ></div>
+                                        <div className="progress-fill" style={{ width: `${progress.progress}%` }}></div>
                                     </div>
                                     <div className="progress-text">
                                         {progress.status === "completed" ? "Ready to Launch" : progress.message}
                                     </div>
                                     {progress.status === "completed" && (
-                                         <button className="launch-btn" onClick={() => alert("Launching logic coming soon!")}>
+                                         <button className="launch-btn" onClick={() => handleLaunch(model)}>
                                             Launch
                                          </button>
                                     )}
                                 </div>
                             ) : compatible ? (
-                                <button className="install-btn" onClick={() => handleInstall(model.id)}>
-                                    Download & Install
-                                </button>
+                                <button className="install-btn" onClick={() => handleInstall(model.id)}>Download & Install</button>
                             ) : (
                                 <div className="warning">Incompatible: {reason}</div>
                             )}
@@ -237,6 +258,30 @@ function App() {
                   })}
                 </div>
               </div>
+            )}
+
+            {activeTab === "chat" && (
+                <div className="chat-container">
+                    <h2>Chat with {activeModelName}</h2>
+                    <div className="messages-area">
+                        {chatMessages.map((msg, i) => (
+                            <div key={i} className={`message ${msg.role}`}>
+                                <strong>{msg.role === "user" ? "You" : "AI"}:</strong> {msg.content}
+                            </div>
+                        ))}
+                        {isChatLoading && <div className="message assistant">Typing...</div>}
+                    </div>
+                    <div className="input-area">
+                        <input 
+                            value={inputMsg} 
+                            onChange={(e) => setInputMsg(e.target.value)} 
+                            onKeyDown={(e) => e.key === "Enter" && sendChatMessage()}
+                            placeholder="Type a message..." 
+                            disabled={isChatLoading}
+                        />
+                        <button onClick={sendChatMessage} disabled={isChatLoading}>Send</button>
+                    </div>
+                </div>
             )}
           </>
         )}

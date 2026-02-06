@@ -2,10 +2,13 @@
 mod specs;
 mod models;
 mod install_manager;
+mod launch_manager;
 
 use specs::SystemSpecs;
 use models::ModelConfig;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
+use std::sync::{Arc, Mutex};
+use launch_manager::ServiceState;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -32,15 +35,27 @@ async fn install_model_command(app: AppHandle, model_id: String) -> Result<(), S
     }
 }
 
+#[tauri::command]
+async fn launch_model_command(app: AppHandle, state: tauri::State<'_, ServiceState>, model_id: String) -> Result<String, String> {
+    let models = models::get_available_models();
+    if let Some(model) = models.into_iter().find(|m| m.id == model_id) {
+        launch_manager::launch_model(app, model, state).await
+    } else {
+        Err("Model not found".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(ServiceState { process: Arc::new(Mutex::new(None)) })
         .invoke_handler(tauri::generate_handler![
             greet, 
             get_system_specs, 
-            get_models,
-            install_model_command
+            get_models, 
+            install_model_command,
+            launch_model_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
