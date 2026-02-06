@@ -1,9 +1,5 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
-
-import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 
