@@ -1,6 +1,6 @@
 [package]
 name = "magic_containermagic-container-app"
-version = "0.4.0"
+version = "0.5.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -25,6 +25,8 @@ serde_json = "1"
 sysinfo = "0.38.0"
 reqwest = { version = "0.13.1", features = ["stream"] }
 futures-util = "0.3.31"
+llama-cpp-2 = { version = "0.1.133", features = ["metal"] }
+anyhow = "1.0.101"
 
 [target.'cfg(windows)'.dependencies]
 nvml-wrapper = "0.10.0"

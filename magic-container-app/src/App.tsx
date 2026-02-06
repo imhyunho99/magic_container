@@ -63,7 +63,7 @@ function App() {
   const [loadingSpecs, setLoadingSpecs] = useState(true);
   const [installProgress, setInstallProgress] = useState<Record<string, ProgressPayload>>({});
   
-  // Chat state
+  // ... (inside App component)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputMsg, setInputMsg] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -71,6 +71,7 @@ function App() {
 
   useEffect(() => {
     async function fetchData() {
+      // ... (fetch logic remains same)
       try {
         const specsData = await invoke<SystemSpecs>("get_system_specs");
         setSpecs(specsData);
@@ -85,18 +86,41 @@ function App() {
     }
     fetchData();
 
-    const unlisten = listen<ProgressPayload>("install-progress", (event) => {
+    // Listen for install progress
+    const unlistenInstall = listen<ProgressPayload>("install-progress", (event) => {
       setInstallProgress((prev) => ({
         ...prev,
         [event.payload.model_id]: event.payload,
       }));
     });
 
+    // Listen for chat tokens (Streaming)
+    const unlistenToken = listen<{ token: string }>("chat-token", (event) => {
+        setChatMessages((prev) => {
+            const lastMsg = prev[prev.length - 1];
+            if (lastMsg && lastMsg.role === "assistant") {
+                // Update last message
+                const newContent = lastMsg.content + event.payload.token;
+                return [...prev.slice(0, -1), { ...lastMsg, content: newContent }];
+            } else {
+                // New assistant message starting
+                return [...prev, { role: "assistant", content: event.payload.token }];
+            }
+        });
+    });
+
+    const unlistenFinished = listen("chat-finished", () => {
+        setIsChatLoading(false);
+    });
+
     return () => {
-      unlisten.then((f) => f());
+      unlistenInstall.then((f) => f());
+      unlistenToken.then((f) => f());
+      unlistenFinished.then((f) => f());
     };
   }, []);
 
+  // ... (handleInstall remains same)
   const handleInstall = async (modelId: string) => {
     try {
       setInstallProgress((prev) => ({
@@ -117,16 +141,18 @@ function App() {
 
   const handleLaunch = async (model: ModelConfig) => {
     try {
-        // Optimistically set progress or showing loading
-        alert(`Launching ${model.name}... This may take a few seconds.`);
-        const res = await invoke("launch_model_command", { modelId: model.id });
+        alert(`Loading ${model.name} into memory... This might take a moment.`);
+        setIsChatLoading(true);
+        const res = await invoke("load_model_command", { modelId: model.id });
         console.log(res);
         setActiveModelName(model.name);
         setActiveTab("chat");
-        setChatMessages([{ role: "assistant", content: `Model ${model.name} loaded. How can I help you?` }]);
+        setChatMessages([{ role: "assistant", content: `Model ${model.name} loaded. I'm ready!` }]);
     } catch (error) {
         console.error("Launch failed:", error);
-        alert("Failed to launch model: " + error);
+        alert("Failed to load model: " + error);
+    } finally {
+        setIsChatLoading(false);
     }
   };
 
@@ -138,23 +164,21 @@ function App() {
     setInputMsg("");
     setIsChatLoading(true);
 
+    // Prepare placeholder for assistant response
+    setChatMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+
     try {
-        const response = await fetch("http://localhost:8000/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: userMsg })
-        });
-        
-        if (!response.ok) throw new Error("Server error");
-        
-        const data = await response.json();
-        setChatMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+        // Start generation (Rust will emit tokens)
+        // Add specific prompt template logic here if needed
+        const prompt = `User: ${userMsg}\nAssistant:`; 
+        await invoke("generate_command", { prompt });
     } catch (error) {
-        setChatMessages((prev) => [...prev, { role: "assistant", content: "Error: Could not connect to model server." }]);
-    } finally {
+        setChatMessages((prev) => [...prev, { role: "assistant", content: "Error: " + error }]);
         setIsChatLoading(false);
     }
   };
+
+  // ... (rest of render logic remains same)
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return "0 GB";
