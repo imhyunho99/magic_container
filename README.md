@@ -1,0 +1,3 @@
+# Magic Container
+
+Project setup.
