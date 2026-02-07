@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { fetchEventSource } from "@microsoft/fetch-event-source";
 import "./App.css";
 
-// ... (Interfaces remain same, add ChatMessage)
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -63,7 +63,7 @@ function App() {
   const [loadingSpecs, setLoadingSpecs] = useState(true);
   const [installProgress, setInstallProgress] = useState<Record<string, ProgressPayload>>({});
   
-  // ... (inside App component)
+  // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputMsg, setInputMsg] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -137,38 +137,21 @@ function App() {
     setInputMsg("");
     setIsChatLoading(true);
 
-    // Prepare assistant message placeholder
+    // Prepare placeholder for assistant response
     setChatMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
     try {
-        // Use fetch with streaming support (or EventSource if endpoint supports GET)
-        // Since we are POSTing, we need to read the body stream.
-        const response = await fetch("http://localhost:8000/chat", {
+        await fetchEventSource("http://localhost:8000/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: userMsg })
-        });
-
-        if (!response.ok) throw new Error("Server error");
-        
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-
-        if (!reader) throw new Error("No reader");
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            const chunk = decoder.decode(value);
-            // Parse SSE format: "data: {...}\n\n"
-            const lines = chunk.split("\n\n");
-            for (const line of lines) {
-                if (line.startsWith("data: ")) {
-                    const dataStr = line.slice(6);
-                    if (dataStr === "[DONE]") continue;
-                    try {
-                        const data = JSON.parse(dataStr);
+            body: JSON.stringify({ message: userMsg }),
+            onmessage(ev) {
+                if (ev.data === "[DONE]") {
+                    return; // Stream finished
+                }
+                try {
+                    const data = JSON.parse(ev.data);
+                    if (data.token) {
                         setChatMessages((prev) => {
                             const lastMsg = prev[prev.length - 1];
                             if (lastMsg && lastMsg.role === "assistant") {
@@ -176,22 +159,26 @@ function App() {
                             }
                             return prev;
                         });
-                    } catch (e) {
-                        console.error("JSON parse error", e);
                     }
+                } catch (e) {
+                    console.error("Parse error:", e);
                 }
+            },
+            onclose() {
+                console.log("Connection closed");
+                setIsChatLoading(false);
+            },
+            onerror(err) {
+                console.error("Stream error:", err);
+                setIsChatLoading(false);
+                throw err; // Rethrow to stop retrying
             }
-        }
+        });
     } catch (error) {
-        setChatMessages((prev) => [...prev, { role: "assistant", content: "Error: " + error }]);
-    } finally {
+        setChatMessages((prev) => [...prev, { role: "assistant", content: " Error: Connection failed." }]);
         setIsChatLoading(false);
     }
   };
-
-  // ... (rest of UI remains same)
-
-  // ... (rest of render logic remains same)
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return "0 GB";
@@ -230,7 +217,6 @@ function App() {
           <>
             {activeTab === "system" && specs && (
               <div className="specs-container">
-                  {/* (System specs rendering same as before) */}
                   <h2>System Diagnostics</h2>
                   <div className="spec-item"><strong>OS:</strong> {specs.os_name} {specs.os_version}</div>
                   <div className="spec-item"><strong>CPU:</strong> {specs.cpu_model} ({specs.cpu_cores} Cores)</div>
