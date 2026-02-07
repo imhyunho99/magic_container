@@ -68,6 +68,7 @@ function App() {
   const [inputMsg, setInputMsg] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [activeModelName, setActiveModelName] = useState("");
+  const [activeModelPort, setActiveModelPort] = useState("");
 
   useEffect(() => {
     async function fetchData() {
@@ -118,9 +119,10 @@ function App() {
   const handleLaunch = async (model: ModelConfig) => {
     try {
         alert(`Launching ${model.name}... This may take a few seconds.`);
-        const res = await invoke("launch_model_command", { modelId: model.id });
-        console.log(res);
+        const port = await invoke<string>("launch_model_command", { modelId: model.id });
+        console.log("Model launched on port:", port);
         setActiveModelName(model.name);
+        setActiveModelPort(port);
         setActiveTab("chat");
         setChatMessages([{ role: "assistant", content: `Model ${model.name} loaded. Ready to chat!` }]);
     } catch (error) {
@@ -131,6 +133,10 @@ function App() {
 
   const sendChatMessage = async () => {
     if (!inputMsg.trim()) return;
+    if (!activeModelPort) {
+        alert("No active model connection.");
+        return;
+    }
 
     const userMsg = inputMsg;
     setChatMessages((prev) => [...prev, { role: "user", content: userMsg }]);
@@ -141,7 +147,7 @@ function App() {
     setChatMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
     try {
-        await fetchEventSource("http://localhost:8000/chat", {
+        await fetchEventSource(`http://localhost:${activeModelPort}/chat`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ message: userMsg }),

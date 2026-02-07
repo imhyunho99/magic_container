@@ -3,10 +3,19 @@ use std::process::{Command, Child};
 use std::sync::{Arc, Mutex};
 use crate::models::ModelConfig;
 use std::path::PathBuf;
+use std::net::TcpListener;
+
+pub struct ChildGuard(Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+    }
+}
 
 // Global state to hold the running python process
 pub struct ServiceState {
-    pub process: Arc<Mutex<Option<Child>>>,
+    pub process: Arc<Mutex<Option<ChildGuard>>>,
 }
 
 fn get_python_path(app_data_dir: &PathBuf) -> PathBuf {
@@ -17,13 +26,15 @@ fn get_python_path(app_data_dir: &PathBuf) -> PathBuf {
     return venv_dir.join("bin").join("python3");
 }
 
+fn get_free_port() -> Option<u16> {
+    TcpListener::bind("127.0.0.1:0").ok().and_then(|l| l.local_addr().ok()).map(|a| a.port())
+}
+
 pub async fn launch_model(app: AppHandle, model: ModelConfig, state: tauri::State<'_, ServiceState>) -> Result<String, String> {
-    // 1. Check if a process is already running, if so, kill it
+    // 1. Check if a process is already running, if so, kill it (Drop will handle kill)
     {
         let mut process_guard = state.process.lock().map_err(|_| "Failed to lock mutex")?;
-        if let Some(mut child) = process_guard.take() {
-            let _ = child.kill(); // Kill previous model
-        }
+        *process_guard = None; // This drops the previous ChildGuard, killing the process
     }
 
     // 2. Resolve paths
@@ -44,29 +55,35 @@ pub async fn launch_model(app: AppHandle, model: ModelConfig, state: tauri::Stat
         return Err(format!("Python venv not found at {:?}. Please reinstall the model.", python_bin));
     }
 
-    // 4. Spawn process
+    // 4. Find free port
+    let port = get_free_port().ok_or("Failed to find free port")?;
+
+    // 5. Spawn process
     let child = Command::new(python_bin)
         .arg(resource_path)
         .arg("--model")
         .arg(model_path)
         .arg("--port")
-        .arg("8000")
+        .arg(port.to_string())
         .spawn()
         .map_err(|e| format!("Failed to start python server: {}", e))?;
 
-    // Store the child process
+    // Store the child process wrapped in guard
     {
         let mut process_guard = state.process.lock().map_err(|_| "Failed to lock mutex")?;
-        *process_guard = Some(child);
+        *process_guard = Some(ChildGuard(child));
     }
 
-    // 5. Wait for health check
+    // 6. Wait for health check
     let client = reqwest::Client::new();
+    let health_url = format!("http://127.0.0.1:{}/health", port);
+    
     for _ in 0..30 { // Try for 30 seconds
         std::thread::sleep(std::time::Duration::from_secs(1));
-        if let Ok(res) = client.get("http://localhost:8000/health").send().await {
+        if let Ok(res) = client.get(&health_url).send().await {
             if res.status().is_success() {
-                return Ok("Server started".to_string());
+                // Return the port so UI can connect
+                return Ok(format!("{}", port));
             }
         }
     }
