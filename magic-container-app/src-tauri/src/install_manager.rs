@@ -15,12 +15,52 @@ struct ProgressPayload {
     message: String,
 }
 
+// Helper to get venv paths
+fn get_venv_paths(app_data_dir: &PathBuf) -> (PathBuf, PathBuf) {
+    let venv_dir = app_data_dir.join("venv");
+    
+    #[cfg(target_os = "windows")]
+    let python_executable = venv_dir.join("Scripts").join("python.exe");
+    #[cfg(not(target_os = "windows"))]
+    let python_executable = venv_dir.join("bin").join("python3");
+
+    #[cfg(target_os = "windows")]
+    let pip_executable = venv_dir.join("Scripts").join("pip.exe");
+    #[cfg(not(target_os = "windows"))]
+    let pip_executable = venv_dir.join("bin").join("pip3");
+
+    (python_executable, pip_executable)
+}
+
 pub async fn install_model(app: AppHandle, model: ModelConfig) -> Result<(), String> {
-    // 1. Setup directories
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    
+    // 0. Ensure Venv Exists
+    let venv_dir = app_data_dir.join("venv");
+    if !venv_dir.exists() {
+        let _ = app.emit("install-progress", ProgressPayload {
+            model_id: model.id.clone(),
+            status: "installing_deps".to_string(),
+            progress: 5,
+            message: "Creating virtual environment...".to_string(),
+        });
+
+        let system_python = if cfg!(target_os = "windows") { "python" } else { "python3" };
+        let output = Command::new(system_python)
+            .arg("-m")
+            .arg("venv")
+            .arg(&venv_dir)
+            .output()
+            .map_err(|e| format!("Failed to create venv: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!("Venv creation failed: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+    }
+
+    // 1. Setup Model Directories
     let model_dir = app_data_dir.join("models").join(&model.id);
     let weights_dir = model_dir.join("weights");
-
     fs::create_dir_all(&weights_dir).map_err(|e| format!("Failed to create dirs: {}", e))?;
 
     let file_path = weights_dir.join(&model.source.filename);
@@ -54,7 +94,7 @@ pub async fn install_model(app: AppHandle, model: ModelConfig) -> Result<(), Str
 
             if total_size > 0 {
                 let percent = downloaded * 100 / total_size;
-                if percent % 5 == 0 { // Emit less frequently
+                if percent % 5 == 0 {
                     let _ = app.emit("install-progress", ProgressPayload {
                         model_id: model.id.clone(),
                         status: "downloading".to_string(),
@@ -66,20 +106,22 @@ pub async fn install_model(app: AppHandle, model: ModelConfig) -> Result<(), Str
         }
     }
 
-    // 3. Setup Python Environment (Install Packages)
+    // 3. Install Python Dependencies (into venv)
     let _ = app.emit("install-progress", ProgressPayload {
         model_id: model.id.clone(),
         status: "installing_deps".to_string(),
         progress: 90,
-        message: "Installing Python dependencies... This may take a while.".to_string(),
+        message: "Installing dependencies into venv...".to_string(),
     });
 
-    if let Err(e) = setup_python_env(&model.python_packages) {
+    let (_, pip_executable) = get_venv_paths(&app_data_dir);
+    
+    if let Err(e) = setup_python_env(&pip_executable, &model.python_packages) {
         let _ = app.emit("install-progress", ProgressPayload {
             model_id: model.id.clone(),
             status: "error".to_string(),
             progress: 0,
-            message: format!("Failed to install dependencies: {}", e),
+            message: format!("Dependency error: {}", e),
         });
         return Err(e);
     }
@@ -95,36 +137,25 @@ pub async fn install_model(app: AppHandle, model: ModelConfig) -> Result<(), Str
     Ok(())
 }
 
-fn setup_python_env(packages: &[String]) -> Result<(), String> {
+fn setup_python_env(pip_path: &PathBuf, packages: &[String]) -> Result<(), String> {
     if packages.is_empty() {
         return Ok(());
     }
 
-    let python_bin = if cfg!(target_os = "windows") { "python" } else { "python3" };
-    let pip_bin = if cfg!(target_os = "windows") { "pip" } else { "pip3" };
-
-    // Check if pip exists
-    if Command::new(python_bin).arg("-m").arg("pip").arg("--version").output().is_err() {
-        return Err("Python or pip not found. Please install Python 3.10+".to_string());
+    if !pip_path.exists() {
+        return Err(format!("Pip not found at {:?}. Venv creation might have failed.", pip_path));
     }
 
-    // Install packages
-    // Use --user to avoid permission issues if not in venv, or rely on system.
-    // Ideally we use a venv, but for now global/user install is simpler for "just works".
-    let mut cmd = Command::new(python_bin);
-    cmd.arg("-m").arg("pip").arg("install").arg("--user"); // Install to user site
-    
-    // Add extra index url for torch/cuda if needed on windows? No, llama-cpp-python handles it mostly.
+    let mut cmd = Command::new(pip_path);
+    cmd.arg("install");
     
     for pkg in packages {
         cmd.arg(pkg);
     }
-
-    // For Mac, ensure we upgrade to get metal support if needed?
-    // llama-cpp-python usually compiles from source, so cmake is needed.
-    // If cmake is missing (which we fixed), it should work.
-    // To be safe, force upgrade
-    cmd.arg("--upgrade");
+    
+    // Fix for macOS specific Metal support or general upgrades
+    // We can add --upgrade or specific index-url here if needed.
+    // For now standard install.
 
     let output = cmd.output().map_err(|e| format!("Failed to run pip: {}", e))?;
 

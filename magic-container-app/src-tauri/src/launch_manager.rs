@@ -9,6 +9,14 @@ pub struct ServiceState {
     pub process: Arc<Mutex<Option<Child>>>,
 }
 
+fn get_python_path(app_data_dir: &PathBuf) -> PathBuf {
+    let venv_dir = app_data_dir.join("venv");
+    #[cfg(target_os = "windows")]
+    return venv_dir.join("Scripts").join("python.exe");
+    #[cfg(not(target_os = "windows"))]
+    return venv_dir.join("bin").join("python3");
+}
+
 pub async fn launch_model(app: AppHandle, model: ModelConfig, state: tauri::State<'_, ServiceState>) -> Result<String, String> {
     // 1. Check if a process is already running, if so, kill it
     {
@@ -29,8 +37,12 @@ pub async fn launch_model(app: AppHandle, model: ModelConfig, state: tauri::Stat
         return Err(format!("Model file not found at: {:?}", model_path));
     }
 
-    // 3. Determine python executable
-    let python_bin = if cfg!(target_os = "windows") { "python" } else { "python3" };
+    // 3. Determine python executable (from venv)
+    let python_bin = get_python_path(&app_data_dir);
+
+    if !python_bin.exists() {
+        return Err(format!("Python venv not found at {:?}. Please reinstall the model.", python_bin));
+    }
 
     // 4. Spawn process
     let child = Command::new(python_bin)
@@ -59,5 +71,5 @@ pub async fn launch_model(app: AppHandle, model: ModelConfig, state: tauri::Stat
         }
     }
 
-    Err("Server timed out".to_string())
+    Err("Server timed out. Check logs.".to_string())
 }
