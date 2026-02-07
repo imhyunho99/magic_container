@@ -71,7 +71,6 @@ function App() {
 
   useEffect(() => {
     async function fetchData() {
-      // ... (fetch logic remains same)
       try {
         const specsData = await invoke<SystemSpecs>("get_system_specs");
         setSpecs(specsData);
@@ -86,41 +85,18 @@ function App() {
     }
     fetchData();
 
-    // Listen for install progress
-    const unlistenInstall = listen<ProgressPayload>("install-progress", (event) => {
+    const unlisten = listen<ProgressPayload>("install-progress", (event) => {
       setInstallProgress((prev) => ({
         ...prev,
         [event.payload.model_id]: event.payload,
       }));
     });
 
-    // Listen for chat tokens (Streaming)
-    const unlistenToken = listen<{ token: string }>("chat-token", (event) => {
-        setChatMessages((prev) => {
-            const lastMsg = prev[prev.length - 1];
-            if (lastMsg && lastMsg.role === "assistant") {
-                // Update last message
-                const newContent = lastMsg.content + event.payload.token;
-                return [...prev.slice(0, -1), { ...lastMsg, content: newContent }];
-            } else {
-                // New assistant message starting
-                return [...prev, { role: "assistant", content: event.payload.token }];
-            }
-        });
-    });
-
-    const unlistenFinished = listen("chat-finished", () => {
-        setIsChatLoading(false);
-    });
-
     return () => {
-      unlistenInstall.then((f) => f());
-      unlistenToken.then((f) => f());
-      unlistenFinished.then((f) => f());
+      unlisten.then((f) => f());
     };
   }, []);
 
-  // ... (handleInstall remains same)
   const handleInstall = async (modelId: string) => {
     try {
       setInstallProgress((prev) => ({
@@ -141,18 +117,15 @@ function App() {
 
   const handleLaunch = async (model: ModelConfig) => {
     try {
-        alert(`Loading ${model.name} into memory... This might take a moment.`);
-        setIsChatLoading(true);
-        const res = await invoke("load_model_command", { modelId: model.id });
+        alert(`Launching ${model.name}... This may take a few seconds.`);
+        const res = await invoke("launch_model_command", { modelId: model.id });
         console.log(res);
         setActiveModelName(model.name);
         setActiveTab("chat");
-        setChatMessages([{ role: "assistant", content: `Model ${model.name} loaded. I'm ready!` }]);
+        setChatMessages([{ role: "assistant", content: `Model ${model.name} loaded. Ready to chat!` }]);
     } catch (error) {
         console.error("Launch failed:", error);
-        alert("Failed to load model: " + error);
-    } finally {
-        setIsChatLoading(false);
+        alert("Failed to launch model: " + error);
     }
   };
 
@@ -164,19 +137,59 @@ function App() {
     setInputMsg("");
     setIsChatLoading(true);
 
-    // Prepare placeholder for assistant response
+    // Prepare assistant message placeholder
     setChatMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
     try {
-        // Start generation (Rust will emit tokens)
-        // Add specific prompt template logic here if needed
-        const prompt = `User: ${userMsg}\nAssistant:`; 
-        await invoke("generate_command", { prompt });
+        // Use fetch with streaming support (or EventSource if endpoint supports GET)
+        // Since we are POSTing, we need to read the body stream.
+        const response = await fetch("http://localhost:8000/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: userMsg })
+        });
+
+        if (!response.ok) throw new Error("Server error");
+        
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+
+        if (!reader) throw new Error("No reader");
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value);
+            // Parse SSE format: "data: {...}\n\n"
+            const lines = chunk.split("\n\n");
+            for (const line of lines) {
+                if (line.startsWith("data: ")) {
+                    const dataStr = line.slice(6);
+                    if (dataStr === "[DONE]") continue;
+                    try {
+                        const data = JSON.parse(dataStr);
+                        setChatMessages((prev) => {
+                            const lastMsg = prev[prev.length - 1];
+                            if (lastMsg && lastMsg.role === "assistant") {
+                                return [...prev.slice(0, -1), { ...lastMsg, content: lastMsg.content + data.token }];
+                            }
+                            return prev;
+                        });
+                    } catch (e) {
+                        console.error("JSON parse error", e);
+                    }
+                }
+            }
+        }
     } catch (error) {
         setChatMessages((prev) => [...prev, { role: "assistant", content: "Error: " + error }]);
+    } finally {
         setIsChatLoading(false);
     }
   };
+
+  // ... (rest of UI remains same)
 
   // ... (rest of render logic remains same)
 
