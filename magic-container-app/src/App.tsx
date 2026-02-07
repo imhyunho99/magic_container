@@ -143,20 +143,49 @@ function App() {
     setInputMsg("");
     setIsChatLoading(true);
 
-    // Prepare placeholder for assistant response
     setChatMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
     try {
-        await fetchEventSource(`http://localhost:${activeModelPort}/chat`, {
+        const response = await fetch(`http://localhost:${activeModelPort}/chat`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message: userMsg }),
-            onmessage(ev) {
-                if (ev.data === "[DONE]") {
-                    return; // Stream finished
-                }
+            headers: { 
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream"
+            },
+            body: JSON.stringify({ message: userMsg })
+        });
+
+        if (!response.ok) throw new Error("Server error");
+        
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+
+        if (!reader) throw new Error("No reader");
+
+        let buffer = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+            
+            // Split by double newline (SSE standard delimiter)
+            const lines = buffer.split("\n\n");
+            // Keep the last part in buffer if it's incomplete
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith("data: ")) continue;
+                
+                const dataStr = trimmed.slice(6).trim();
+                if (dataStr === "[DONE]") continue;
+                
                 try {
-                    const data = JSON.parse(ev.data);
+                    console.log("Raw SSE:", dataStr); // Debug log
+                    const data = JSON.parse(dataStr);
                     if (data.token) {
                         setChatMessages((prev) => {
                             const lastMsg = prev[prev.length - 1];
@@ -167,21 +196,14 @@ function App() {
                         });
                     }
                 } catch (e) {
-                    console.error("Parse error:", e);
+                    console.warn("JSON parse error for:", dataStr);
                 }
-            },
-            onclose() {
-                console.log("Connection closed");
-                setIsChatLoading(false);
-            },
-            onerror(err) {
-                console.error("Stream error:", err);
-                setIsChatLoading(false);
-                throw err; // Rethrow to stop retrying
             }
-        });
+        }
     } catch (error) {
+        console.error("Stream error:", error);
         setChatMessages((prev) => [...prev, { role: "assistant", content: " Error: Connection failed." }]);
+    } finally {
         setIsChatLoading(false);
     }
   };
