@@ -32,21 +32,29 @@ async def chat(request: ChatRequest):
     if model is None:
         raise HTTPException(status_code=500, detail="Model not loaded")
     
+    # Prompt engineering: Basic
     prompt = f"User: {request.message}\nAssistant: "
     
     def event_generator():
-        stream = model(
-            prompt,
-            max_tokens=request.max_tokens,
-            stop=["User:", "\nUser"],
-            temperature=request.temperature,
-            stream=True
-        )
-        for output in stream:
-            text = output['choices'][0]['text']
-            # Send data as Server-Sent Event
-            yield f"data: {json.dumps({'token': text})}\\n\n"
-        yield "data: [DONE]\n\n"
+        try:
+            stream = model(
+                prompt,
+                max_tokens=request.max_tokens,
+                stop=["User:", "\nUser"],
+                temperature=request.temperature,
+                stream=True
+            )
+            for output in stream:
+                text = output['choices'][0]['text']
+                if text:
+                    # Correct SSE format: data: <json>\n\n
+                    payload = json.dumps({"token": text}, ensure_ascii=False)
+                    yield f"data: {payload}\n\n"
+            
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            error_msg = json.dumps({"error": str(e)}, ensure_ascii=False)
+            yield f"data: {error_msg}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -57,13 +65,12 @@ def health():
 def load_model(path: str):
     global model
     print(f"Loading model from: {path}")
-    # n_gpu_layers=-1 means offload all to GPU if supported
     try:
+        # n_gpu_layers=-1 attempts to offload to Metal/CUDA
         model = Llama(model_path=path, n_gpu_layers=-1, n_ctx=2048, verbose=True)
         print("Model loaded successfully!")
     except Exception as e:
         print(f"Failed to load model: {e}")
-        # Don't exit, let the health check report failure or retry
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

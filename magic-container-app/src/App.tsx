@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { fetchEventSource } from "@microsoft/fetch-event-source";
 import "./App.css";
 
 interface ChatMessage {
