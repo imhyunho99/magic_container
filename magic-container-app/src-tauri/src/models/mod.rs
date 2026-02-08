@@ -29,19 +29,19 @@ pub struct ModelConfig {
 pub fn get_available_models() -> Vec<ModelConfig> {
     vec![
         ModelConfig {
-            id: "tinyllama-1.1b-chat-gguf".to_string(),
-            name: "TinyLlama 1.1B Chat".to_string(),
-            description: "Super lightweight & fast. Runs on almost any laptop (even without GPU). Perfect for basic chat.".to_string(),
-            version: "v1.0-Q4_K_M".to_string(),
+            id: "qwen2.5-1.5b-instruct-gguf".to_string(),
+            name: "Qwen2.5 1.5B Instruct".to_string(),
+            description: "Best-in-class lightweight model. Excellent Korean support and reasoning. Runs smoothly on 4GB+ RAM laptops.".to_string(),
+            version: "Q4_K_M".to_string(),
             task_type: "text-generation".to_string(),
             requirements: ModelRequirements {
-                min_ram: 2 * 1024 * 1024 * 1024, // 2 GB
-                min_vram: 1 * 1024 * 1024 * 1024, // 1 GB (optional)
-                disk_space: 700 * 1024 * 1024, // ~700 MB
+                min_ram: 4 * 1024 * 1024 * 1024, // 4 GB
+                min_vram: 2 * 1024 * 1024 * 1024, // 2 GB (optional)
+                disk_space: 1 * 1024 * 1024 * 1024, // ~1 GB
             },
             source: ModelSource {
-                url: "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf".to_string(),
-                filename: "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf".to_string(),
+                url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf".to_string(),
+                filename: "qwen2.5-1.5b-instruct-q4_k_m.gguf".to_string(),
             },
             python_packages: vec![
                 "llama-cpp-python".to_string(),
@@ -50,19 +50,19 @@ pub fn get_available_models() -> Vec<ModelConfig> {
             ],
         },
         ModelConfig {
-            id: "phi-2-gguf".to_string(),
-            name: "Microsoft Phi-2".to_string(),
-            description: "Surprisingly powerful for its size (2.7B). Good reasoning capabilities. Runs well on 8GB RAM.".to_string(),
+            id: "gemma-2-2b-it-gguf".to_string(),
+            name: "Google Gemma 2 2B".to_string(),
+            description: "Google's latest lightweight open model. Strong logical reasoning and summarization. Good for office tasks.".to_string(),
             version: "Q4_K_M".to_string(),
             task_type: "text-generation".to_string(),
             requirements: ModelRequirements {
                 min_ram: 4 * 1024 * 1024 * 1024, // 4 GB
-                min_vram: 3 * 1024 * 1024 * 1024, // 3 GB (optional)
-                disk_space: 2 * 1024 * 1024 * 1024, // ~2 GB
+                min_vram: 2 * 1024 * 1024 * 1024, // 2 GB (optional)
+                disk_space: 2 * 1024 * 1024 * 1024, // ~1.7 GB
             },
             source: ModelSource {
-                url: "https://huggingface.co/TheBloke/phi-2-GGUF/resolve/main/phi-2.Q4_K_M.gguf".to_string(),
-                filename: "phi-2.Q4_K_M.gguf".to_string(),
+                url: "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf".to_string(),
+                filename: "gemma-2-2b-it-Q4_K_M.gguf".to_string(),
             },
             python_packages: vec![
                 "llama-cpp-python".to_string(),
@@ -73,7 +73,7 @@ pub fn get_available_models() -> Vec<ModelConfig> {
         ModelConfig {
             id: "whisper-tiny".to_string(),
             name: "Whisper Tiny".to_string(),
-            description: "OpenAI's lightweight speech recognition model. Extremely fast and runs on almost any CPU. Great for testing.".to_string(),
+            description: "OpenAI's lightweight speech recognition model. Converts voice to text very quickly.".to_string(),
             version: "tiny".to_string(),
             task_type: "speech-to-text".to_string(),
             requirements: ModelRequirements {
@@ -88,27 +88,6 @@ pub fn get_available_models() -> Vec<ModelConfig> {
             python_packages: vec![
                 "openai-whisper".to_string(),
                 "soundfile".to_string()
-            ],
-        },
-        ModelConfig {
-            id: "llama-2-7b-chat-gguf".to_string(),
-            name: "Llama 2 7B Chat".to_string(),
-            description: "A quantized LLM optimized for chat. Good balance of performance and resource usage.".to_string(),
-            version: "Q4_K_M".to_string(),
-            task_type: "text-generation".to_string(),
-            requirements: ModelRequirements {
-                min_ram: 8 * 1024 * 1024 * 1024, // 8 GB
-                min_vram: 6 * 1024 * 1024 * 1024, // 6 GB recommended
-                disk_space: 5 * 1024 * 1024 * 1024, // ~5 GB
-            },
-            source: ModelSource {
-                url: "https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q4_K_M.gguf".to_string(),
-                filename: "llama-2-7b-chat.Q4_K_M.gguf".to_string(),
-            },
-            python_packages: vec![
-                "llama-cpp-python".to_string(),
-                "uvicorn".to_string(),
-                "fastapi".to_string()
             ],
         }
     ]
