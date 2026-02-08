@@ -29,9 +29,9 @@ pub struct ModelConfig {
 pub fn get_available_models() -> Vec<ModelConfig> {
     vec![
         ModelConfig {
-            id: "qwen2.5-1.5b-instruct-gguf".to_string(),
-            name: "Qwen2.5 1.5B Instruct".to_string(),
-            description: "Best-in-class lightweight model. Excellent Korean support and reasoning. Runs smoothly on 4GB+ RAM laptops.".to_string(),
+            id: "qwen2.5-1.5b-instruct-v2".to_string(), // Changed ID to force re-download
+            name: "Qwen2.5 1.5B Instruct",
+            description: "Best-in-class lightweight model. Excellent Korean support and reasoning. Runs smoothly on 4GB+ RAM laptops.",
             version: "Q4_K_M".to_string(),
             task_type: "text-generation".to_string(),
             requirements: ModelRequirements {
